@@ -1,0 +1,46 @@
+name: 🔁 保活
+
+# 背景：GitHub 在【公开仓库】中，若 60 天没有任何仓库活动，会自动禁用所有 schedule 工作流。
+# 定时任务自己跑多少次都不算"活动"，只有 push/commit/issues/PR 才算。
+# 本仓库自 2020-10-29 后没有任何提交，所以每 60 天必被禁用一次。
+#
+# 本工作流每周产生一次真实的提交（更新 .keepalive 时间戳），用于重置 60 天计时器，
+# 从而让「nodejs tb autosign」那类纯定时任务可以长期存活。
+#
+# 注：用 GITHUB_TOKEN 推送不会触发 on: push 的工作流（GitHub 防递归机制），
+#     所以这里不会额外跑一次签到。
+
+on:
+  schedule:
+    - cron: "17 2 * * 1"      # 每周一 10:17（北京时间），避开整点
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Commit keepalive timestamp
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "$TS" > .keepalive
+          git add .keepalive
+          if git diff --cached --quiet; then
+            echo "无变化，跳过"
+            exit 0
+          fi
+          git commit -m "chore: keepalive $TS [skip ci]"
+          git push
+          echo "✅ 已提交保活标记，60 天计时器已重置"
